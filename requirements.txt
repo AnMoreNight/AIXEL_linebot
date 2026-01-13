@@ -2,3 +2,8 @@ fastapi
 uvicorn[standard]
 line-bot-sdk
 python-dotenv
+requests
+gspread
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
