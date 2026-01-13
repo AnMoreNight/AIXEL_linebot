@@ -12,10 +12,10 @@ from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMe
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent
 
 from api.config import (
-    LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET, CMD, MODE, PLANS, CREDIT_PACKS, TAX_RATE
+    LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET, CMD, MODE, PLANS, MAX_LINE_SPLITS, CREDIT_PACKS, TAX_RATE
 )
 from api.database import db, init_database
-from api.utils import is_command, estimate_tokens, split_for_line, MAX_LINE_SPLITS, now_iso
+from api.utils import is_command, estimate_tokens, split_for_line, now_iso
 from api.handlers import (
     ensure_monthly_grant, help_content, credit_status_text, ability_list_text,
     ability_explain_content, run_diagnosis, run_normal_chat
