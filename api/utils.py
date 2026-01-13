@@ -5,14 +5,20 @@ import json
 import random
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+import pytz
+from api.config import TIMEZONE
+
+# Get timezone object
+_tz = pytz.timezone(TIMEZONE)
 
 def now_iso() -> str:
-    """Get current time in ISO format"""
-    return datetime.utcnow().isoformat() + "Z"
+    """Get current time in ISO format (Asia/Tokyo timezone)"""
+    now = datetime.now(_tz)
+    return now.isoformat()
 
 def yyyymm() -> str:
-    """Get current year-month in YYYYMM format"""
-    now = datetime.now()
+    """Get current year-month in YYYYMM format (Asia/Tokyo timezone)"""
+    now = datetime.now(_tz)
     return f"{now.year}{now.month:02d}"
 
 def safe_json(s: str) -> Dict[str, Any]:
@@ -28,10 +34,32 @@ def estimate_tokens(text: str) -> int:
         return 1
     return max(1, (len(text) + 3) // 4)
 
+def normalize_command(text: str) -> str:
+    """Normalize command text for exact matching (Spec 08)
+    - Remove leading/trailing whitespace
+    - Remove newlines and invisible characters
+    - Keep full-width/half-width distinction
+    """
+    if not text:
+        return ""
+    # Remove whitespace, newlines, and invisible chars
+    normalized = "".join(c for c in text if c.isprintable() and not c.isspace())
+    return normalized
+
 def is_command(text: str) -> bool:
-    """Check if text is a command (exact match)"""
+    """Check if text is a command (exact match with normalization - Spec 08)"""
     from api.config import CMD
-    return text in CMD.values()
+    normalized = normalize_command(text)
+    return normalized in CMD.values()
+
+def match_command(text: str) -> Optional[str]:
+    """Match normalized command text to command value"""
+    from api.config import CMD
+    normalized = normalize_command(text)
+    for cmd_key, cmd_value in CMD.items():
+        if normalized == cmd_value:
+            return cmd_key
+    return None
 
 def random_choice(arr: List[Any]) -> Any:
     """Random choice from array"""

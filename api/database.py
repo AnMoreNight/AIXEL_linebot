@@ -84,13 +84,15 @@ class Database:
             if len(row) > 0 and row[0] == user_id:
                 return self._row_to_user(row, i)
         
-        # Create new user
+        # Create new user (Spec 07 - FREE gets initial grant)
         now = now_iso()
+        from api.config import PLANS
+        initial_grant = PLANS["FREE"].get("initialGrant", 5000)
         user = {
             "user_id": user_id,
             "plan": "FREE",
-            "credits": 0,
-            "last_grant_yyyymm": "",
+            "credits": initial_grant,  # Initial grant for FREE plan
+            "last_grant_yyyymm": "INITIAL",  # Mark as initial grant
             "mode": MODE["IDLE"],
             "mode_started_at": now,
             "tmp_json": "{}",
@@ -104,6 +106,12 @@ class Database:
             user["created_at"], user["updated_at"]
         ]
         sheet.append_row(row)
+        
+        # Log initial grant event
+        self.log_event(
+            user["user_id"], "system", "credit_change", user["mode"],
+            False, f"initial_grant:{initial_grant}", initial_grant, {"plan": "FREE", "type": "initial"}
+        )
         
         # Get the row index for the new user (after append, it's the last row)
         all_values = sheet.get_all_values()

@@ -15,11 +15,12 @@ from api.config import (
     LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET, CMD, MODE, PLANS, MAX_LINE_SPLITS, CREDIT_PACKS, TAX_RATE
 )
 from api.database import db, init_database
-from api.utils import is_command, estimate_tokens, split_for_line, now_iso
+from api.utils import is_command, match_command, normalize_command, estimate_tokens, split_for_line, now_iso
 from api.handlers import (
     ensure_monthly_grant, help_content, credit_status_text, ability_list_text,
     ability_explain_content, run_diagnosis, run_normal_chat
 )
+from api.training import handle_training_step
 from api.config import GOOGLE_SHEET_ID, GOOGLE_SERVICE_ACCOUNT_JSON
 
 load_dotenv()
@@ -83,7 +84,10 @@ def handle_message(event: MessageEvent):
     # Monthly grant
     ensure_monthly_grant(user)
     
-    # Log command (not observed)
+    # Normalize command for matching (Spec 08)
+    normalized_text = normalize_command(message_text)
+    
+    # Log command (not observed - Spec 02)
     if is_command(message_text):
         db.log_event(user_id, "line", "command", user["mode"], False, message_text, 0, {})
     
@@ -97,16 +101,18 @@ def handle_message(event: MessageEvent):
         is_observed, reply, estimate_tokens(reply), {}
     )
     
-    # Consume credits
-    cost = estimate_tokens(reply)
-    if user.get("credits", 0) > 0:
-        user["credits"] = max(0, user["credits"] - cost)
-        user["updated_at"] = now_iso()
-        db.save_user(user)
-        db.log_event(
-            user_id, "system", "credit_change", user["mode"],
-            False, f"consume:{cost}", cost, {"reason": "ai_reply"}
-        )
+    # Consume credits (Spec 09 - different costs for different operations)
+    # Note: Diagnosis and training handle their own credit consumption
+    if user["mode"] not in [MODE["DIAGNOSIS"], MODE["TRAINING"]]:
+        cost = estimate_tokens(reply)
+        if user.get("credits", 0) > 0:
+            user["credits"] = max(0, user["credits"] - cost)
+            user["updated_at"] = now_iso()
+            db.save_user(user)
+            db.log_event(
+                user_id, "system", "credit_change", user["mode"],
+                False, f"consume:{cost}", cost, {"reason": "ai_reply"}
+            )
     
     # Reply to LINE
     try:
@@ -149,14 +155,15 @@ def route_by_mode(user: dict, text: str, channel: str) -> str:
     """Route message by user mode"""
     text = text.strip()
     
-    # Credit depletion check
-    allow_when_zero = [
-        CMD["CREDIT"], CMD["CHANGE"], CMD["BUY"],
-        CMD["HELP1"], CMD["HELP2"], CMD["HELP3"],
-        CMD["DIAG"], CMD["TRAIN"], CMD["EXPLAIN"]
+    # Credit depletion check (Spec 02)
+    # Commands that work even with 0 credits
+    cmd_key = match_command(text)
+    allow_when_zero_commands = [
+        "CREDIT", "CHANGE", "BUY", "HELP1", "HELP2", "HELP3",
+        "DIAG", "TRAIN", "EXPLAIN", "SUPPORT", "INQUIRY"
     ]
     
-    if user.get("credits", 0) <= 0 and text not in allow_when_zero and user["mode"] == MODE["IDLE"]:
+    if user.get("credits", 0) <= 0 and cmd_key not in allow_when_zero_commands and user["mode"] == MODE["IDLE"]:
         return "\n".join([
             "現在の残クレジットは 0クレジット です。",
             "会話は止めませんが、追加のAI応答を生成できない状態です。",
@@ -180,10 +187,39 @@ def route_by_mode(user: dict, text: str, channel: str) -> str:
 
 def handle_idle(user: dict, text: str) -> str:
     """Handle idle mode"""
-    from api.utils import safe_json
+    from api.utils import safe_json, normalize_command, match_command
+    
+    normalized = normalize_command(text)
+    cmd_key = match_command(text)
+    
+    # Support command (Spec 09)
+    if cmd_key in ["SUPPORT", "INQUIRY"]:
+        user["mode"] = MODE["IDLE"]
+        user["mode_started_at"] = now_iso()
+        user["updated_at"] = now_iso()
+        db.save_user(user)
+        return "\n".join([
+            "【サポート・問い合わせ】",
+            "",
+            "AIXELのサポートはメール対応のみです。",
+            "",
+            "サポート用メールアドレス：",
+            "aixel@bilo-g.com",
+            "",
+            "問い合わせ可能な内容の例：",
+            "・動作不具合",
+            "・課金・クレジットに関する問題",
+            "・利用上の技術的質問",
+            "",
+            "【注意事項】",
+            "・個人情報・決済情報を本文に直接記載しないこと",
+            "・返信までに時間がかかる場合があること",
+            "",
+            "（診断結果・能力評価への意見・修正対応は行いません）"
+        ])
     
     # Help
-    if text in [CMD["HELP1"], CMD["HELP2"], CMD["HELP3"]]:
+    if cmd_key in ["HELP1", "HELP2", "HELP3"]:
         user["mode"] = MODE["IDLE"]
         user["mode_started_at"] = now_iso()
         user["updated_at"] = now_iso()
@@ -191,11 +227,11 @@ def handle_idle(user: dict, text: str) -> str:
         return help_content()
     
     # Credit status
-    if text == CMD["CREDIT"]:
+    if cmd_key == "CREDIT":
         return credit_status_text(user)
     
     # Plan change
-    if text == CMD["CHANGE"]:
+    if cmd_key == "CHANGE":
         user["mode"] = MODE["PLAN_CHANGE"]
         user["mode_started_at"] = now_iso()
         user["tmp_json"] = '{"step":"ask_plan"}'
@@ -212,7 +248,7 @@ def handle_idle(user: dict, text: str) -> str:
         ])
     
     # Buy credits
-    if text == CMD["BUY"]:
+    if cmd_key == "BUY":
         user["mode"] = MODE["BUY_FLOW"]
         user["mode_started_at"] = now_iso()
         user["tmp_json"] = '{"step":"ask_pack"}'
@@ -232,7 +268,7 @@ def handle_idle(user: dict, text: str) -> str:
         ])
     
     # Ability explain
-    if text == CMD["EXPLAIN"]:
+    if cmd_key == "EXPLAIN":
         user["mode"] = MODE["ABILITY_EXPLAIN"]
         user["mode_started_at"] = now_iso()
         user["tmp_json"] = '{"step":"ask_ability"}'
@@ -243,7 +279,7 @@ def handle_idle(user: dict, text: str) -> str:
         return ability_list_text("能力解説を開始します。見たい能力の番号を入力してください：")
     
     # Training
-    if text == CMD["TRAIN"]:
+    if cmd_key == "TRAIN":
         user["mode"] = MODE["TRAINING"]
         user["mode_started_at"] = now_iso()
         user["tmp_json"] = '{"step":"ask_ability","qCount":0,"chosen":null,"challenge":null,"attempt":0}'
@@ -254,14 +290,16 @@ def handle_idle(user: dict, text: str) -> str:
         return ability_list_text("トレーニングを開始します。鍛えたい能力の番号を入力してください：")
     
     # Diagnosis
-    if text == CMD["DIAG"]:
+    if cmd_key == "DIAG":
         return run_diagnosis(user)
     
-    # Normal chat (observed)
-    db.log_event(
-        user["user_id"], "system", "user_message", MODE["IDLE"],
-        True, text, estimate_tokens(text), {"channel": "any"}
-    )
+    # Normal chat (observed - commands excluded)
+    # Commands are already logged above, so only log non-commands here
+    if not is_command(text):
+        db.log_event(
+            user["user_id"], "system", "user_message", MODE["IDLE"],
+            True, text, estimate_tokens(text), {"channel": "any"}
+        )
     return run_normal_chat(user, text)
 
 def handle_plan_change(user: dict, text: str) -> str:
@@ -373,43 +411,11 @@ def handle_ability_explain(user: dict, text: str) -> str:
     return msg + "\n\n（能力解説はここまで。続けて通常会話OKです）"
 
 def handle_training(user: dict, text: str) -> str:
-    """Handle training mode (simplified - full implementation needed)"""
-    from api.utils import safe_json
+    """Handle training mode (Spec 02, Spec 06)"""
+    # Training input is NOT observed (Spec 02)
+    db.log_event(
+        user["user_id"], "system", "user_message", MODE["TRAINING"],
+        False, text, 0, {"excluded": True, "training": True}
+    )
     
-    tmp = safe_json(user.get("tmp_json", "{}"))
-    
-    # Step: ask_ability
-    if tmp.get("step") == "ask_ability":
-        try:
-            n = int(text.strip())
-            if n < 1 or n > 11:
-                return "1〜11 の番号を入力してください。"
-        except ValueError:
-            return "1〜11 の番号を入力してください。"
-        
-        # Check plan restrictions
-        plan = user.get("plan", "FREE")
-        if plan == "FREE" and n not in PLANS["FREE"]["trainingAllowed"]:
-            return "\n".join([
-                "現在のプラン（FREE）では、トレーニング対象は以下のみです：",
-                "1 抽象化能力 / 2 分解能力",
-                "",
-                "他の能力をトレーニングしたい場合：『変更』で STANDARD / PRO を選択できます。",
-                "（トレーニングは任意です。無理に誘導はしません）"
-            ])
-        
-        # For now, return simple message (full training flow needs implementation)
-        from api.config import ABILITIES
-        ability = next((a for a in ABILITIES if a["id"] == n), None)
-        if ability:
-            user["mode"] = MODE["IDLE"]
-            user["tmp_json"] = "{}"
-            user["updated_at"] = now_iso()
-            db.save_user(user)
-            return f"【トレーニング：{ability['name']}】\n\nトレーニング機能は現在実装中です。"
-    
-    # Return to idle if state is inconsistent
-    user["mode"] = MODE["IDLE"]
-    user["updated_at"] = now_iso()
-    db.save_user(user)
-    return "状態が不整合だったため、通常モードに戻しました。"
+    return handle_training_step(user, text)

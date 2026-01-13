@@ -5,11 +5,11 @@ Constants and configuration from GAS version
 import os
 from typing import Dict, Any
 
-# Plans configuration
+# Plans configuration (Spec 02, Spec 07 - corrected)
 PLANS = {
-    "FREE": {"monthlyGrant": 5000, "trainingAllowed": [1, 2], "label": "FREE"},
-    "STANDARD": {"monthlyGrant": 65000, "trainingAllowed": "ALL", "label": "STANDARD"},
-    "PRO": {"monthlyGrant": 230000, "trainingAllowed": "ALL", "label": "PRO"}
+    "FREE": {"monthlyGrant": 0, "initialGrant": 5000, "trainingAllowed": [1, 2], "label": "FREE"},
+    "STANDARD": {"monthlyGrant": 65000, "initialGrant": 0, "trainingAllowed": "ALL", "label": "STANDARD"},
+    "PRO": {"monthlyGrant": 130000, "initialGrant": 0, "trainingAllowed": "ALL", "label": "PRO"}
 }
 
 # Credit packs (tax excluded)
@@ -22,7 +22,7 @@ CREDIT_PACKS = {
 # Tax rate (Japan: 10%)
 TAX_RATE = 0.10
 
-# Commands (exact match only)
+# Commands (exact match only - Spec 02, Spec 09)
 CMD = {
     "DIAG": "診断",
     "TRAIN": "トレーニング",
@@ -32,7 +32,9 @@ CMD = {
     "BUY": "購入",
     "HELP1": "説明",
     "HELP2": "使い方",
-    "HELP3": "ヘルプ"
+    "HELP3": "ヘルプ",
+    "SUPPORT": "サポート",
+    "INQUIRY": "問い合わせ"
 }
 
 # Modes
@@ -76,3 +78,6 @@ LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "")
 # Google Sheets settings
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+
+# Timezone settings
+TIMEZONE = os.getenv("TIMEZONE", "Asia/Tokyo")
