@@ -349,6 +349,17 @@ async def get_user_events(user_id: str, limit: int = 100,
 # Session Endpoints
 # ============================================================================
 
+@router.get("/sessions")
+async def list_sessions(limit: int = 100,
+                       current_admin: Dict[str, Any] = Depends(require_analyst)):
+    """List all sessions (OWNER, INCIDENT_RESPONDER, ANALYST)"""
+    admin_db_instance = get_admin_db()
+    if not admin_db_instance:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    
+    sessions = admin_db_instance.get_all_sessions(limit=limit)
+    return {"sessions": sessions}
+
 @router.get("/sessions/{session_id}")
 async def get_session(session_id: str, current_admin: Dict[str, Any] = Depends(require_analyst)):
     """Get session by ID (OWNER, INCIDENT_RESPONDER, ANALYST)"""

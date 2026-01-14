@@ -228,6 +228,25 @@ class AdminDatabase:
         
         return None
     
+    def get_all_sessions(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get all sessions across all users (recent first)"""
+        users_sheet = self.db.get_sheet("Users")
+        all_users = users_sheet.get_all_values()
+        
+        all_sessions = []
+        
+        # Get sessions from all users
+        for row in all_users[1:]:
+            if len(row) > 0:
+                user_id = row[0]
+                user_sessions = self.get_user_sessions(user_id, limit=1000)
+                all_sessions.extend(user_sessions)
+        
+        # Sort by started_at (most recent first)
+        all_sessions.sort(key=lambda s: s.get("started_at", ""), reverse=True)
+        
+        return all_sessions[:limit]
+    
     def get_dashboard_stats(self) -> Dict[str, Any]:
         """Get dashboard statistics"""
         users_sheet = self.db.get_sheet("Users")
