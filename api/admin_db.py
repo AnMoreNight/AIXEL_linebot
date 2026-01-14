@@ -93,7 +93,8 @@ class AdminDatabase:
         
         for i, row in enumerate(all_values[1:], start=2):
             if len(row) > 0 and row[0] == admin_id:
-                sheet.update(f"H{i}", now_iso())  # last_login_at is at column H
+                # gspread update() requires list of lists format
+                sheet.update(f"H{i}", [[now_iso()]])  # last_login_at is at column H
                 break
     
     def _row_to_admin_user(self, row: List[str], row_index: int) -> Dict[str, Any]:
@@ -505,8 +506,9 @@ class AdminDatabase:
         # Find setting
         for i, row in enumerate(all_values[1:], start=2):
             if len(row) > 0 and row[0] == key:
-                sheet.update(f"B{i}", value)  # setting_value
-                sheet.update(f"D{i}", now_iso())  # updated_at
+                # gspread update() requires list of lists format
+                sheet.update(f"B{i}", [[value]])  # setting_value
+                sheet.update(f"D{i}", [[now_iso()]])  # updated_at
                 return
         
         # Create new setting if not found
