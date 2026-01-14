@@ -23,6 +23,7 @@ from api.handlers import (
 )
 from api.training import handle_training_step
 from api.config import GOOGLE_SHEET_ID, GOOGLE_SERVICE_ACCOUNT_JSON
+from api.admin_routes import router as admin_router
 
 load_dotenv()
 
@@ -39,6 +40,9 @@ configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 app = FastAPI()
+
+# Include admin routes
+app.include_router(admin_router)
 
 @app.on_event("startup")
 async def startup_event():

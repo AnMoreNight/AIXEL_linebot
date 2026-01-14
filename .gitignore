@@ -3,6 +3,6 @@ __pycache__/
 **/__pycache__/
 requirements/
 requirements/*
-REVIEW_SUMMARY.md
-BOT_WORKFLOW.md
 management/
+*.md
+!README.md

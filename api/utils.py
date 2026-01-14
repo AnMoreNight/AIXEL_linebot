@@ -12,9 +12,10 @@ from api.config import TIMEZONE
 _tz = pytz.timezone(TIMEZONE)
 
 def now_iso() -> str:
-    """Get current time in ISO format (Asia/Tokyo timezone)"""
+    """Get current time in ISO format without timezone offset (Asia/Tokyo timezone)"""
     now = datetime.now(_tz)
-    return now.isoformat()
+    # Convert to Asia/Tokyo timezone but format without offset
+    return now.strftime("%Y-%m-%dT%H:%M:%S")
 
 def yyyymm() -> str:
     """Get current year-month in YYYYMM format (Asia/Tokyo timezone)"""

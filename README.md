@@ -89,7 +89,12 @@ pip install -r requirements.txt
    - `Events`
    - `Purchases`
 3. Add header rows (see [Google Sheets Structure](#google-sheets-structure) below)
-4. Create a Google Service Account:
+4. **Create additional sheets for Management UI** (optional, will be auto-created):
+   - `AdminUsers` - Admin user accounts
+   - `Incidents` - Incident management
+   - `AuditLogs` - Audit trail
+   - `Settings` - System settings
+5. Create a Google Service Account:
    - Go to [Google Cloud Console](https://console.cloud.google.com/)
    - Create a new project or select existing
    - Enable Google Sheets API
@@ -127,6 +132,7 @@ Create a `.env` file or set these in your deployment platform:
 | `OPENAI_BASE_URL` | OpenAI API base URL | `https://api.openai.com/v1` |
 | `MAX_LINE_SPLITS` | Max message splits for LINE | `6` |
 | `TIMEZONE` | Timezone for all datetime operations | `Asia/Tokyo` |
+| `JWT_SECRET_KEY` | JWT secret for admin authentication | `your-secret-key-change-in-production` |
 
 ### Example `.env` file
 
@@ -139,6 +145,7 @@ OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o-mini
 MAX_LINE_SPLITS=6
 TIMEZONE=Asia/Tokyo
+JWT_SECRET_KEY=your-secret-key-change-in-production-use-random-string
 ```
 
 ## Google Sheets Structure
@@ -243,6 +250,35 @@ ngrok http 8000
 ```
 
 Then set the webhook URL in LINE Developers Console to: `https://your-ngrok-url.ngrok.io/api/callback`
+
+## Management UI
+
+A separate Next.js Management UI is available in the `management/` directory. See `management/README.md` for details.
+
+### Creating Admin Users
+
+1. Navigate to `/signup` in the Management UI
+2. Fill in display name, email, and password
+3. **First user** automatically becomes `OWNER`
+4. **Subsequent users** default to `AUDITOR_VIEWER`
+
+**Roles**: `OWNER`, `INCIDENT_RESPONDER`, `BILLING_ADMIN`, `ANALYST`, `AUDITOR_VIEWER`
+
+### Admin API Endpoints
+
+The admin API endpoints are available at `/api/admin/*`:
+- `POST /api/admin/auth/signup` - Create admin account (first user = OWNER)
+- `POST /api/admin/auth/login` - Admin login
+- `GET /api/admin/auth/me` - Get current admin
+- `GET /api/admin/dashboard/stats` - Dashboard statistics
+- `GET /api/admin/users/lookup` - Search users
+- `GET /api/admin/users/{user_id}` - Get user details
+- `GET /api/admin/incidents` - List incidents
+- `GET /api/admin/billing/credit-ledger` - Credit ledger
+- `GET /api/admin/audit` - Audit logs
+- And more... (see `api/admin_routes.py`)
+
+See `API_STRUCTURE.md` for detailed API documentation and `GOOGLE_SHEETS_SETUP.md` for database schema.
 
 ## Deployment
 

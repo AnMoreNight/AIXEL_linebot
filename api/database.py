@@ -49,6 +49,10 @@ class Database:
         self.init_sheet_headers("Users")
         self.init_sheet_headers("Events")
         self.init_sheet_headers("Purchases")
+        self.init_sheet_headers("AdminUsers")  # Spec 09: Management UI
+        self.init_sheet_headers("Incidents")  # Spec 09: Management UI
+        self.init_sheet_headers("AuditLogs")  # Spec 09: Management UI
+        self.init_sheet_headers("Settings")  # Spec 09: Management UI
     
     def init_sheet_headers(self, sheet_name: str):
         """Initialize sheet headers"""
@@ -63,6 +67,17 @@ class Database:
         elif sheet_name == "Purchases":
             headers = ["purchase_id", "user_id", "product_type", "pack", "amount_yen_ex_tax",
                       "tax", "amount_yen_in_tax", "credits", "status", "created_at", "updated_at"]
+        elif sheet_name == "AdminUsers":
+            headers = ["admin_id", "email", "password_hash", "role", "display_name", 
+                      "created_at", "updated_at", "last_login_at"]
+        elif sheet_name == "Incidents":
+            headers = ["incident_id", "title", "description", "status", "severity",
+                      "created_by", "assigned_to", "target_user_ids", "created_at", "updated_at", "resolved_at"]
+        elif sheet_name == "AuditLogs":
+            headers = ["audit_id", "admin_id", "action", "resource_type", "resource_id",
+                      "details", "ip_address", "user_agent", "created_at"]
+        elif sheet_name == "Settings":
+            headers = ["setting_key", "setting_value", "description", "updated_at"]
         else:
             return
         
