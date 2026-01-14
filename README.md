@@ -133,6 +133,7 @@ Create a `.env` file or set these in your deployment platform:
 | `MAX_LINE_SPLITS` | Max message splits for LINE | `6` |
 | `TIMEZONE` | Timezone for all datetime operations | `Asia/Tokyo` |
 | `JWT_SECRET_KEY` | JWT secret for admin authentication | `your-secret-key-change-in-production` |
+| `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | `http://localhost:3000,http://localhost:3001` |
 
 ### Example `.env` file
 
@@ -146,6 +147,7 @@ OPENAI_MODEL=gpt-4o-mini
 MAX_LINE_SPLITS=6
 TIMEZONE=Asia/Tokyo
 JWT_SECRET_KEY=your-secret-key-change-in-production-use-random-string
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,https://your-frontend-domain.com
 ```
 
 ## Google Sheets Structure
