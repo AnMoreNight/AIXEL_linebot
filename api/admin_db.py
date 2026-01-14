@@ -311,13 +311,12 @@ class AdminDatabase:
         }
     
     def get_credit_ledger(self, user_id: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get credit ledger entries"""
+        """Get credit ledger entries - calculate balances chronologically"""
         events_sheet = self.db.get_sheet("Events")
         all_events = events_sheet.get_all_values()
         
-        ledger = []
-        balance = {}
-        
+        # Filter and collect credit_change events
+        credit_events = []
         for row in all_events[1:]:
             if len(row) > 4:
                 event_type = row[4]
@@ -327,40 +326,107 @@ class AdminDatabase:
                     continue
                 
                 if event_type == "credit_change":
-                    text = row[7] if len(row) > 7 else ""
-                    meta_json = row[9] if len(row) > 9 else "{}"
+                    # Extract token_est (amount) from column 8
+                    token_est = 0
+                    if len(row) > 8:
+                        token_est_str = str(row[8]).strip()
+                        if token_est_str:
+                            try:
+                                # Remove commas and convert to int
+                                token_est_str = token_est_str.replace(",", "").replace(" ", "")
+                                token_est = int(float(token_est_str))  # Handle float strings
+                            except (ValueError, TypeError):
+                                token_est = 0
                     
-                    try:
-                        meta = json.loads(meta_json)
-                        amount = meta.get("amount", 0)
-                        reason = meta.get("reason", "")
-                        
-                        if row_user_id not in balance:
-                            # Get initial balance from user
-                            user = self.get_user_by_id(row_user_id)
-                            balance[row_user_id] = user.get("credits", 0) - amount
-                        
-                        balance_before = balance[row_user_id]
-                        balance_after = balance_before + amount
-                        balance[row_user_id] = balance_after
-                        
-                        transaction_type = "grant" if amount > 0 else "consume"
-                        
-                        ledger.append({
-                            "ledger_id": row[0] if len(row) > 0 else str(uuid.uuid4()),
-                            "user_id": row_user_id,
-                            "transaction_type": transaction_type,
-                            "amount": amount,
-                            "balance_before": balance_before,
-                            "balance_after": balance_after,
-                            "reason": reason,
-                            "meta_json": meta_json,
-                            "created_at": row[1] if len(row) > 1 else ""
-                        })
-                    except:
-                        pass
+                    credit_events.append({
+                        "event_id": row[0] if len(row) > 0 else "",
+                        "timestamp": row[1] if len(row) > 1 else "",
+                        "user_id": row_user_id,
+                        "text": row[7] if len(row) > 7 else "",
+                        "token_est": token_est,
+                        "meta_json": row[9] if len(row) > 9 else "{}"
+                    })
         
-        # Reverse to get chronological order (newest first)
+        # Sort by timestamp (oldest first) to calculate balances correctly
+        credit_events.sort(key=lambda x: x["timestamp"])
+        
+        # Calculate balances chronologically
+        ledger = []
+        balance = {}  # Track balance per user
+        
+        for event in credit_events:
+            row_user_id = event["user_id"]
+            meta_json = event["meta_json"]
+            token_est = event["token_est"]
+            text = event["text"]
+            
+            try:
+                meta = json.loads(meta_json)
+                reason = meta.get("reason", "")
+                meta_type = meta.get("type", "")
+                
+                # Determine amount based on reason, type, and text
+                # token_est stores the absolute value, we need to determine sign
+                amount = 0
+                
+                if token_est == 0:
+                    # No amount, skip or set to 0
+                    amount = 0
+                # Check for grant types (positive amounts)
+                elif reason == "initial" or meta_type == "initial":
+                    # Initial grant: positive amount
+                    amount = abs(token_est)
+                elif reason == "monthly_grant" or meta_type == "monthly":
+                    # Monthly grant: positive amount
+                    amount = abs(token_est)
+                elif "grant" in text.lower() or "付与" in text or "purchase_grant" in text:
+                    # Grant from text: positive amount
+                    amount = abs(token_est)
+                # Check for consumption types (negative amounts)
+                elif reason in ["ai_reply", "diagnosis", "training"]:
+                    # Consumption: negative amount
+                    amount = -abs(token_est)
+                elif "consume" in text.lower() or "消費" in text or "diagnosis_consume" in text or "training_consume" in text:
+                    # Consumption from text: negative amount
+                    amount = -abs(token_est)
+                else:
+                    # Fallback: if we can't determine, try to infer from text pattern
+                    # Most credit_change events with consume in text are negative
+                    if "consume" in text.lower():
+                        amount = -abs(token_est)
+                    elif "grant" in text.lower():
+                        amount = abs(token_est)
+                    else:
+                        # Default: assume it's a consumption if token_est > 0 and no clear grant indicator
+                        amount = -abs(token_est) if token_est > 0 else 0
+                
+                # Initialize balance for user if first transaction
+                if row_user_id not in balance:
+                    balance[row_user_id] = 0
+                
+                # Calculate balance before and after
+                balance_before = balance[row_user_id]
+                balance_after = balance_before + amount
+                balance[row_user_id] = balance_after
+                
+                transaction_type = "grant" if amount > 0 else "consume"
+                
+                ledger.append({
+                    "ledger_id": event["event_id"],
+                    "user_id": row_user_id,
+                    "transaction_type": transaction_type,
+                    "amount": amount,
+                    "balance_before": balance_before,
+                    "balance_after": balance_after,
+                    "reason": reason,
+                    "meta_json": meta_json,
+                    "created_at": event["timestamp"]
+                })
+            except Exception as e:
+                # Skip invalid entries
+                continue
+        
+        # Return newest first (reverse chronological)
         return list(reversed(ledger[-limit:]))
     
     def get_purchases(self, user_id: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
