@@ -56,7 +56,7 @@ class Database:
         
         if sheet_name == "Users":
             headers = ["user_id", "plan", "credits", "last_grant_yyyymm", "mode", 
-                      "mode_started_at", "tmp_json", "created_at", "updated_at"]
+                      "mode_started_at", "tmp_json", "last_diagnosis_json", "oneshot_experience_used", "created_at", "updated_at"]
         elif sheet_name == "Events":
             headers = ["event_id", "timestamp", "user_id", "channel", "type", "mode",
                       "is_observed", "text", "token_est", "meta_json"]
@@ -84,10 +84,10 @@ class Database:
             if len(row) > 0 and row[0] == user_id:
                 return self._row_to_user(row, i)
         
-        # Create new user (Spec 07 - FREE gets initial grant)
+        # Create new user (Spec 01 - FREE gets initial grant)
         now = now_iso()
         from api.config import PLANS
-        initial_grant = PLANS["FREE"].get("initialGrant", 5000)
+        initial_grant = PLANS["FREE"].get("initialGrant", 5000)  # Spec 07: 5,000クレジット
         user = {
             "user_id": user_id,
             "plan": "FREE",
@@ -96,14 +96,16 @@ class Database:
             "mode": MODE["IDLE"],
             "mode_started_at": now,
             "tmp_json": "{}",
+            "last_diagnosis_json": "{}",  # Spec 01: Store last diagnosis for reference
+            "oneshot_experience_used": False,  # Spec 04: One-shot experience flag
             "created_at": now,
             "updated_at": now
         }
         
         row = [
             user["user_id"], user["plan"], user["credits"], user["last_grant_yyyymm"],
-            user["mode"], user["mode_started_at"], user["tmp_json"],
-            user["created_at"], user["updated_at"]
+            user["mode"], user["mode_started_at"], user["tmp_json"], user["last_diagnosis_json"],
+            str(user["oneshot_experience_used"]), user["created_at"], user["updated_at"]
         ]
         sheet.append_row(row)
         
@@ -121,6 +123,12 @@ class Database:
     
     def _row_to_user(self, row: List[str], row_index: int) -> Dict[str, Any]:
         """Convert sheet row to user dict"""
+        # Handle legacy rows without oneshot_experience_used
+        oneshot_used = False
+        if len(row) > 8:
+            oneshot_str = row[8].strip().lower()
+            oneshot_used = oneshot_str == "true" or oneshot_str == "1"
+        
         return {
             "_row_index": row_index,
             "user_id": row[0] if len(row) > 0 else "",
@@ -130,8 +138,10 @@ class Database:
             "mode": row[4] if len(row) > 4 else MODE["IDLE"],
             "mode_started_at": row[5] if len(row) > 5 else "",
             "tmp_json": row[6] if len(row) > 6 else "{}",
-            "created_at": row[7] if len(row) > 7 else "",
-            "updated_at": row[8] if len(row) > 8 else ""
+            "last_diagnosis_json": row[7] if len(row) > 7 else "{}",
+            "oneshot_experience_used": oneshot_used,  # Spec 04
+            "created_at": row[9] if len(row) > 9 else "",
+            "updated_at": row[10] if len(row) > 10 else ""
         }
     
     def save_user(self, user: Dict[str, Any]):
@@ -161,12 +171,14 @@ class Database:
             user.get("mode", MODE["IDLE"]),  # mode (E)
             user.get("mode_started_at", ""),  # mode_started_at (F)
             user.get("tmp_json", "{}"),  # tmp_json (G)
-            user.get("created_at", ""),  # created_at (H)
-            updated_at  # updated_at (I)
+            user.get("last_diagnosis_json", "{}"),  # last_diagnosis_json (H) - Spec 01
+            str(user.get("oneshot_experience_used", False)),  # oneshot_experience_used (I) - Spec 04
+            user.get("created_at", ""),  # created_at (J)
+            updated_at  # updated_at (K)
         ]
         
         # Update entire row at once
-        sheet.update(f"A{row_index}:I{row_index}", [row_data])
+        sheet.update(f"A{row_index}:K{row_index}", [row_data])
     
     def log_event(self, user_id: str, channel: str, event_type: str, mode: str,
                   is_observed: bool, text: str = "", token_est: int = 0, meta: Dict = None):

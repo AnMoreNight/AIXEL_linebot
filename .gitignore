@@ -4,3 +4,5 @@ __pycache__/
 requirements/
 requirements/*
 REVIEW_SUMMARY.md
+BOT_WORKFLOW.md
+management/

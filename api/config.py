@@ -5,24 +5,27 @@ Constants and configuration from GAS version
 import os
 from typing import Dict, Any
 
-# Plans configuration (Spec 02, Spec 07 - corrected)
+# Plans configuration (Spec 07 - v0.8最終凍結版)
 PLANS = {
-    "FREE": {"monthlyGrant": 0, "initialGrant": 5000, "trainingAllowed": [1, 2], "label": "FREE"},
-    "STANDARD": {"monthlyGrant": 65000, "initialGrant": 0, "trainingAllowed": "ALL", "label": "STANDARD"},
-    "PRO": {"monthlyGrant": 130000, "initialGrant": 0, "trainingAllowed": "ALL", "label": "PRO"}
+    "FREE": {"monthlyGrant": 0, "initialGrant": 5000, "trainingAllowed": [1, 2], "label": "FREE"},  # Spec 07: 5,000クレジット初回1回のみ
+    "STANDARD": {"monthlyGrant": 65000, "initialGrant": 0, "trainingAllowed": "ALL", "label": "STANDARD"},  # Spec 07: 65,000クレジット／月
+    "PRO": {"monthlyGrant": 130000, "initialGrant": 0, "trainingAllowed": "ALL", "label": "PRO"}  # Spec 07: 130,000クレジット／月
 }
 
-# Credit packs (tax excluded)
+# Credit packs (tax excluded) - Spec 03: 統一後の表記例（仕様内正式形）
+# Tax-inclusive prices: S=100円, M=250円, L=400円, LL=700円, XL=2000円
 CREDIT_PACKS = {
-    "S": {"yenExTax": 2000, "credits": 50000},
-    "M": {"yenExTax": 5000, "credits": 125000},
-    "L": {"yenExTax": 10000, "credits": 250000}
+    "S": {"yenExTax": 91, "credits": 1000},      # 100円（税込） → 1,000クレジット
+    "M": {"yenExTax": 227, "credits": 3000},    # 250円（税込） → 3,000クレジット
+    "L": {"yenExTax": 364, "credits": 5000},     # 400円（税込） → 5,000クレジット
+    "LL": {"yenExTax": 636, "credits": 10000},   # 700円（税込） → 10,000クレジット
+    "XL": {"yenExTax": 1818, "credits": 30000}   # 2000円（税込） → 30,000クレジット
 }
 
 # Tax rate (Japan: 10%)
 TAX_RATE = 0.10
 
-# Commands (exact match only - Spec 02, Spec 09)
+# Commands (exact match only - Spec 02, Spec 09, Spec 04)
 CMD = {
     "DIAG": "診断",
     "TRAIN": "トレーニング",
@@ -34,7 +37,9 @@ CMD = {
     "HELP2": "使い方",
     "HELP3": "ヘルプ",
     "SUPPORT": "サポート",
-    "INQUIRY": "問い合わせ"
+    "INQUIRY": "問い合わせ",
+    "ONESHOT": "1000円",
+    "ONESHOT_EXP": "1000円体験"
 }
 
 # Modes
@@ -45,7 +50,8 @@ MODE = {
     "ABILITY_EXPLAIN": "ability_explain",
     "HELP": "help",
     "PLAN_CHANGE": "plan_change",
-    "BUY_FLOW": "buy_flow"
+    "BUY_FLOW": "buy_flow",
+    "ONESHOT_EXPERIENCE": "oneshot_experience"
 }
 
 # 11 Abilities

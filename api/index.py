@@ -18,7 +18,8 @@ from api.database import db, init_database
 from api.utils import is_command, match_command, normalize_command, estimate_tokens, split_for_line, now_iso
 from api.handlers import (
     ensure_monthly_grant, help_content, credit_status_text, ability_list_text,
-    ability_explain_content, run_diagnosis, run_normal_chat
+    ability_explain_content, run_diagnosis, run_normal_chat,
+    handle_oneshot_start, handle_oneshot_purchase, handle_oneshot_input
 )
 from api.training import handle_training_step
 from api.config import GOOGLE_SHEET_ID, GOOGLE_SERVICE_ACCOUNT_JSON
@@ -160,20 +161,79 @@ def route_by_mode(user: dict, text: str, channel: str) -> str:
     cmd_key = match_command(text)
     allow_when_zero_commands = [
         "CREDIT", "CHANGE", "BUY", "HELP1", "HELP2", "HELP3",
-        "DIAG", "TRAIN", "EXPLAIN", "SUPPORT", "INQUIRY"
+        "DIAG", "TRAIN", "EXPLAIN", "SUPPORT", "INQUIRY",
+        "ONESHOT", "ONESHOT_EXP"  # Spec 04: Independent of credits
     ]
     
     if user.get("credits", 0) <= 0 and cmd_key not in allow_when_zero_commands and user["mode"] == MODE["IDLE"]:
+        # Spec 02 - 13, 20-2: Credit depletion UX (factual explanation + choices only)
         return "\n".join([
             "現在の残クレジットは 0クレジット です。",
-            "会話は止めませんが、追加のAI応答を生成できない状態です。",
+            "追加のAI応答を生成できない状態です。",
+            "",
             "選択肢：",
             "・追加購入：『購入』",
             "・プラン変更：『変更』",
             "・残量確認：『クレジット』"
         ])
     
-    # Route by mode
+    # Route by mode (Spec 02 - 3-2: 状態遷移)
+    # Commands (クレジット/変更/購入) work in any mode (Spec 02 - 3-2)
+    # Spec 04: ONESHOT commands also work in any mode (but check re-purchase first)
+    cmd_key = match_command(text)
+    if cmd_key in ["ONESHOT", "ONESHOT_EXP"]:
+        # Spec 04: Handle oneshot start (checks re-purchase internally)
+        return handle_oneshot_start(user)
+    elif cmd_key == "CREDIT":
+        return credit_status_text(user)
+    elif cmd_key == "CHANGE":
+        # Interrupt current mode and go to plan change
+        user["mode"] = MODE["PLAN_CHANGE"]
+        user["mode_started_at"] = now_iso()
+        user["tmp_json"] = '{"step":"ask_plan"}'
+        user["updated_at"] = now_iso()
+        db.save_user(user)
+        db.log_event(user["user_id"], "system", "mode_change", user["mode"], False, "enter_plan_change", 0, {})
+        return "\n".join([
+            "プラン変更を行います。",
+            "希望プランを完全一致で入力してください：",
+            "FREE / STANDARD / PRO",
+            "",
+            "（料金：STANDARD 月額：4,000円（税込）／PRO 月額：8,000円（税込））",  # Spec 07: v0.8最終凍結版
+            "",
+            "※ 機能差はありません。差分はクレジット量のみです。"
+        ])
+    elif cmd_key == "BUY":
+        # Interrupt current mode and go to buy flow
+        user["mode"] = MODE["BUY_FLOW"]
+        user["mode_started_at"] = now_iso()
+        user["tmp_json"] = '{"step":"ask_pack"}'
+        user["updated_at"] = now_iso()
+        db.save_user(user)
+        db.log_event(user["user_id"], "system", "mode_change", user["mode"], False, "enter_buy_flow", 0, {})
+        # Spec 03: Display tax-inclusive prices (統一後の表記例)
+        s_tax_in = int(CREDIT_PACKS['S']['yenExTax'] * (1 + TAX_RATE))
+        m_tax_in = int(CREDIT_PACKS['M']['yenExTax'] * (1 + TAX_RATE))
+        l_tax_in = int(CREDIT_PACKS['L']['yenExTax'] * (1 + TAX_RATE))
+        ll_tax_in = int(CREDIT_PACKS['LL']['yenExTax'] * (1 + TAX_RATE))
+        xl_tax_in = int(CREDIT_PACKS['XL']['yenExTax'] * (1 + TAX_RATE))
+        
+        return "\n".join([
+            "追加クレジット購入を行います。希望パックを完全一致で入力してください：",
+            "S / M / L / LL / XL",
+            "",
+            f"S：{s_tax_in}円（税込） → {CREDIT_PACKS['S']['credits']:,}クレジット",
+            f"M：{m_tax_in}円（税込） → {CREDIT_PACKS['M']['credits']:,}クレジット",
+            f"L：{l_tax_in}円（税込） → {CREDIT_PACKS['L']['credits']:,}クレジット",
+            f"LL：{ll_tax_in}円（税込） → {CREDIT_PACKS['LL']['credits']:,}クレジット",
+            f"XL：{xl_tax_in}円（税込） → {CREDIT_PACKS['XL']['credits']:,}クレジット",
+            "",
+            "購入しない場合は「購入しない」と入力してください。",
+            "",
+            "（βでは外部決済連携は未接続想定のため、ここでは(購入完了)としてクレジット付与まで実行します。後で外部決済に差し替え可能です）"
+        ])
+    
+    # Route by current mode
     if user["mode"] == MODE["PLAN_CHANGE"]:
         return handle_plan_change(user, text)
     elif user["mode"] == MODE["BUY_FLOW"]:
@@ -182,6 +242,21 @@ def route_by_mode(user: dict, text: str, channel: str) -> str:
         return handle_ability_explain(user, text)
     elif user["mode"] == MODE["TRAINING"]:
         return handle_training(user, text)
+    elif user["mode"] == MODE["ONESHOT_EXPERIENCE"]:
+        # Spec 04: Handle oneshot experience mode
+        from api.utils import safe_json
+        tmp = safe_json(user.get("tmp_json", "{}"))
+        if tmp.get("step") == "purchase":
+            return handle_oneshot_purchase(user, text)
+        elif tmp.get("step") == "input":
+            return handle_oneshot_input(user, text)
+        else:
+            # Invalid state - return to idle
+            user["mode"] = MODE["IDLE"]
+            user["tmp_json"] = "{}"
+            user["updated_at"] = now_iso()
+            db.save_user(user)
+            return "状態が不整合だったため、通常モードに戻しました。"
     else:  # IDLE or default
         return handle_idle(user, text)
 
@@ -192,12 +267,20 @@ def handle_idle(user: dict, text: str) -> str:
     normalized = normalize_command(text)
     cmd_key = match_command(text)
     
-    # Support command (Spec 09)
+    # Support command (Spec 09 - 18: サポート・問い合わせ仕様)
     if cmd_key in ["SUPPORT", "INQUIRY"]:
+        # Spec 09 - 18-4: 観測ログ対象外（コマンド除外ルールに準拠）
+        db.log_event(
+            user["user_id"], "system", "user_message", user["mode"],
+            False, text, estimate_tokens(text), {"excluded": True, "command": "support"}
+        )
+        
         user["mode"] = MODE["IDLE"]
         user["mode_started_at"] = now_iso()
         user["updated_at"] = now_iso()
         db.save_user(user)
+        
+        # Spec 09 - 18-5: サポートコマンド返却内容（固定・以下の情報のみ）
         return "\n".join([
             "【サポート・問い合わせ】",
             "",
@@ -213,9 +296,7 @@ def handle_idle(user: dict, text: str) -> str:
             "",
             "【注意事項】",
             "・個人情報・決済情報を本文に直接記載しないこと",
-            "・返信までに時間がかかる場合があること",
-            "",
-            "（診断結果・能力評価への意見・修正対応は行いません）"
+            "・返信までに時間がかかる場合があること"
         ])
     
     # Help
@@ -226,48 +307,9 @@ def handle_idle(user: dict, text: str) -> str:
         db.save_user(user)
         return help_content()
     
-    # Credit status
-    if cmd_key == "CREDIT":
-        return credit_status_text(user)
+    # Credit status, Plan change, Buy credits are handled in route_by_mode (work in any mode)
     
-    # Plan change
-    if cmd_key == "CHANGE":
-        user["mode"] = MODE["PLAN_CHANGE"]
-        user["mode_started_at"] = now_iso()
-        user["tmp_json"] = '{"step":"ask_plan"}'
-        user["updated_at"] = now_iso()
-        db.save_user(user)
-        
-        db.log_event(user["user_id"], "system", "mode_change", user["mode"], False, "enter_plan_change", 0, {})
-        return "\n".join([
-            "プラン変更を行います。",
-            "希望プランを完全一致で入力してください：",
-            "FREE / STANDARD / PRO",
-            "",
-            "（料金：STANDARD 月額：4,000円（税抜）／PRO 月額：14,000円（税抜））"
-        ])
-    
-    # Buy credits
-    if cmd_key == "BUY":
-        user["mode"] = MODE["BUY_FLOW"]
-        user["mode_started_at"] = now_iso()
-        user["tmp_json"] = '{"step":"ask_pack"}'
-        user["updated_at"] = now_iso()
-        db.save_user(user)
-        
-        db.log_event(user["user_id"], "system", "mode_change", user["mode"], False, "enter_buy_flow", 0, {})
-        return "\n".join([
-            "追加クレジット購入（税抜）を行います。希望パックを完全一致で入力してください：",
-            "S / M / L",
-            "",
-            f"S：{CREDIT_PACKS['S']['yenExTax']:,}円（税抜）→ {CREDIT_PACKS['S']['credits']:,}クレジット",
-            f"M：{CREDIT_PACKS['M']['yenExTax']:,}円（税抜）→ {CREDIT_PACKS['M']['credits']:,}クレジット",
-            f"L：{CREDIT_PACKS['L']['yenExTax']:,}円（税抜）→ {CREDIT_PACKS['L']['credits']:,}クレジット",
-            "",
-            "（βでは外部決済連携は未接続想定のため、ここでは(購入完了)としてクレジット付与まで実行します。後で外部決済に差し替え可能です）"
-        ])
-    
-    # Ability explain
+    # Ability explain (Spec 08 - v0.8確定版: 能力解説コマンド)
     if cmd_key == "EXPLAIN":
         user["mode"] = MODE["ABILITY_EXPLAIN"]
         user["mode_started_at"] = now_iso()
@@ -276,6 +318,7 @@ def handle_idle(user: dict, text: str) -> str:
         db.save_user(user)
         
         db.log_event(user["user_id"], "system", "mode_change", user["mode"], False, "enter_ability_explain", 0, {})
+        # Spec 08 - 2-2: Show 11 abilities list with numbers
         return ability_list_text("能力解説を開始します。見たい能力の番号を入力してください：")
     
     # Training
@@ -332,7 +375,7 @@ def handle_plan_change(user: dict, text: str) -> str:
     ])
 
 def handle_buy_flow(user: dict, text: str) -> str:
-    """Handle buy flow mode"""
+    """Handle buy flow mode (Spec 02 - 13, 追記㉝)"""
     from api.utils import safe_json
     
     tmp = safe_json(user.get("tmp_json", "{}"))
@@ -342,9 +385,22 @@ def handle_buy_flow(user: dict, text: str) -> str:
         db.save_user(user)
         return "状態が不整合だったため、通常モードに戻しました。"
     
+    # Spec 02 - 追記㉝: Handle "購入しない" option
+    if text.strip() in ["購入しない", "しない", "やめる", "キャンセル"]:
+        user["mode"] = MODE["IDLE"]
+        user["mode_started_at"] = now_iso()
+        user["tmp_json"] = "{}"
+        user["updated_at"] = now_iso()
+        db.save_user(user)
+        return "Idle（通常モード）に戻りました。"
+    
     pack = text.strip().upper()
     if pack not in CREDIT_PACKS:
-        return "入力が一致しませんでした。S / M / L のいずれかを完全一致で入力してください。"
+        return "\n".join([
+            "入力が一致しませんでした。S / M / L / LL / XL のいずれかを完全一致で入力してください。",
+            "",
+            "購入しない場合は「購入しない」と入力してください。"
+        ])
     
     p = CREDIT_PACKS[pack]
     tax = int(p["yenExTax"] * TAX_RATE)
@@ -371,12 +427,12 @@ def handle_buy_flow(user: dict, text: str) -> str:
     
     return "\n".join([
         "購入が完了しました（β：即時付与）。",
-        f"{pack}：{p['yenExTax']:,}円（税抜）／{yen_in_tax:,}円（税込） → {p['credits']:,}クレジット 付与",
+        f"{pack}：{yen_in_tax:,}円（税込） → {p['credits']:,}クレジット 付与",
         credit_status_text(user)
     ])
 
 def handle_ability_explain(user: dict, text: str) -> str:
-    """Handle ability explain mode"""
+    """Handle ability explain mode (Spec 08 - v0.8確定版)"""
     from api.utils import safe_json
     
     tmp = safe_json(user.get("tmp_json", "{}"))
@@ -393,22 +449,42 @@ def handle_ability_explain(user: dict, text: str) -> str:
     except ValueError:
         return "1〜11 の番号を入力してください。"
     
-    # Not observed
+    plan = user.get("plan", "FREE")
+    
+    # Spec 08 - 4: Plan restriction check (FREE only abilities 1-2)
+    if plan == "FREE" and n not in [1, 2]:
+        # Spec 08 - 4: Fixed message, no choices/guidance, return to Idle
+        user["mode"] = MODE["IDLE"]
+        user["mode_started_at"] = now_iso()
+        user["tmp_json"] = "{}"
+        user["updated_at"] = now_iso()
+        db.save_user(user)
+        
+        # Spec 08 - 3: Not observed (isolated area)
+        db.log_event(
+            user["user_id"], "system", "user_message", MODE["ABILITY_EXPLAIN"],
+            False, text, estimate_tokens(text), {"excluded": True, "plan_restricted": True}
+        )
+        
+        return "この能力の解説は、\n現在のプランでは利用できません。"
+    
+    # Spec 08 - 3: Not observed (isolated area - 能力解説は説明モード専用の隔離領域)
     db.log_event(
         user["user_id"], "system", "user_message", MODE["ABILITY_EXPLAIN"],
-        False, text, estimate_tokens(text), {"excluded": True}
+        False, text, estimate_tokens(text), {"excluded": True, "ability_explain": True}
     )
     
-    msg = ability_explain_content(n, user.get("plan", "FREE"))
+    msg = ability_explain_content(n, plan)
     
-    # Return to idle
+    # Spec 08 - 2-2: Return to Idle (継続質問・誘導なし)
     user["mode"] = MODE["IDLE"]
     user["mode_started_at"] = now_iso()
     user["tmp_json"] = "{}"
     user["updated_at"] = now_iso()
     db.save_user(user)
     
-    return msg + "\n\n（能力解説はここまで。続けて通常会話OKです）"
+    # Spec 08 - 2-2: No continuation prompt, just return explanation
+    return msg
 
 def handle_training(user: dict, text: str) -> str:
     """Handle training mode (Spec 02, Spec 06)"""
