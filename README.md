@@ -278,7 +278,7 @@ The admin API endpoints are available at `/api/admin/*`:
 - `GET /api/admin/audit` - Audit logs
 - And more... (see `api/admin_routes.py`)
 
-See `API_STRUCTURE.md` for detailed API documentation and `GOOGLE_SHEETS_SETUP.md` for database schema.
+See `API_STRUCTURE.md` for detailed API documentation, `GOOGLE_SHEETS_SETUP.md` for database schema, and `API_TESTING_GUIDE.md` for testing instructions.
 
 ## Deployment
 

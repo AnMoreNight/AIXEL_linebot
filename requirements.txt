@@ -11,4 +11,5 @@ pytz
 pypdf
 python-jose[cryptography]
 passlib[bcrypt]
+bcrypt<4.1.0
 python-multipart
